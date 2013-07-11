@@ -9,9 +9,9 @@ import string
 
 
 # Construct list of omega points
-wmin=-10
-wmax=10
-wnum=401
+wmin=-8
+wmax=8
+wnum=201
 dw=float(wmax-wmin)/(wnum-1)
 wlist=np.zeros(wnum)
 for i in range(wnum):
@@ -20,7 +20,7 @@ for i in range(wnum):
 
 # Read data and set parameters for Gtau
 beta=10 
-fname='../dnGtau_U2J023B10.dat'
+fname='../dn3Gtau_U2J023B10.dat'
 itr=0
 for i in open(fname,"r"):
     itr+=1
@@ -60,77 +60,83 @@ model=np.ones(wnum)
 norm=dw*model.sum()
 model=model/norm
 
-# Trial spectral function
-Aguess1=np.ones(wnum)
-norm=dw*Aguess1.sum()
-Aguess1=Aguess1/norm
-Gguess1=dw*np.dot(Ker,Aguess1)
-Gguess2=Gguess1.copy()
-Chi1=maxent_def.chisquared(Gin,Gguess1,Err)
-
-
-# Parameters for MaxEnt
-alpha=2000.0
-tempstart=10
-refrac=1.0
-LHS=1.0
-RHS=1.0
-tol=0.01
-MCcycle=4000
 
 # MaxEnt Loop
-itr=0
-sam=0
-np.random.seed(seed=423945)
-for alphacycle in range(50):
-    acc=0
-    temp=tempstart
-    for i in range(100*MCcycle):
-        Aguess2,w1,w2=maxent_def.propose_move(Aguess1,refrac)
-        Gguess2=Gguess1+dw*Ker[:,w1]*(Aguess2[w1]-Aguess1[w1])+dw*Ker[:,w2]*(Aguess2[w2]-Aguess1[w2])
-        Chi2=maxent_def.chisquared(Gin,Gguess2,Err)
-        dS=dw*(- Aguess2[w1]*log(Aguess2[w1]/model[w1]) \
-                     - Aguess2[w2]*log(Aguess2[w2]/model[w2]) \
-                     + Aguess1[w1]*log(Aguess1[w1]/model[w1]) \
-                     + Aguess1[w2]*log(Aguess1[w2]/model[w2]))
-        weight=((Chi2-Chi1)/2.0 - alpha*dS)/temp
-        if weight < 0:
-            prob=1
+avgA=np.zeros(wnum)
+# Average over random seeds 
+rndseeds=[423945,102342,945323,453123,32481,76231]
+for rndnum in rndseeds:
+    # Initialize parameters for MaxEnt
+    alpha=2000.0
+    tempstart=10
+    refrac=1.0
+    LHS=1.0
+    RHS=1.0
+    tol=0.01
+    MCcycle=5000
+    # Trial spectral function
+    Aguess1=np.ones(wnum)
+    norm=dw*Aguess1.sum()
+    Aguess1=Aguess1/norm
+    Gguess1=dw*np.dot(Ker,Aguess1)
+    Gguess2=Gguess1.copy()
+    Chi1=maxent_def.chisquared(Gin,Gguess1,Err)
+    np.random.seed(seed=rndnum)
+    for alphacycle in range(50):
+        acc=0
+        temp=tempstart
+        for i in range(60*MCcycle):
+            Aguess2,w1,w2=maxent_def.propose_move(Aguess1,refrac)
+            Gguess2=Gguess1+dw*Ker[:,w1]*(Aguess2[w1]-Aguess1[w1])+dw*Ker[:,w2]*(Aguess2[w2]-Aguess1[w2])
+            Chi2=maxent_def.chisquared(Gin,Gguess2,Err)
+            dS=dw*(- Aguess2[w1]*log(Aguess2[w1]/model[w1]) \
+                         - Aguess2[w2]*log(Aguess2[w2]/model[w2]) \
+                         + Aguess1[w1]*log(Aguess1[w1]/model[w1]) \
+                         + Aguess1[w2]*log(Aguess1[w2]/model[w2]))
+            weight=((Chi2-Chi1)/2.0 - alpha*dS)/temp
+            if weight < 0:
+                prob=1
+            else:
+                prob=exp(-weight)
+            if prob < 0: print "Error"
+            if (np.random.rand() < prob):
+                Aguess1=Aguess2.copy()
+                Chi1=Chi2.copy()
+                Gguess1=Gguess2.copy()
+                acc+=1.0
+            #if abs(dw*Aguess1.sum()-1)>tol: print "normalization error"
+            if i%(MCcycle)==0 and i!=0:
+                print "cycles,acc,temp,chi",i,acc/MCcycle,temp,Chi1
+                if float(acc)/MCcycle > 0.1:
+                    if refrac < 0.01: refrac *= 1.5
+                    if refrac > 0.001: refrac /= 1.5 
+                acc=0
+                temp/=1.5
+        #Check convergence
+        tempstart=1
+        refrac=0.05        
+        lmda=dw*(np.sqrt(Aguess1)*(hessian*np.sqrt(Aguess1)).transpose()).transpose()
+        ev=linalg.eig(lmda,right=False,left=False).real
+        RHS=(ev/(alpha+ev)).sum()
+        S=maxent_def.entropy(Aguess1,model,dw)
+        LHS=-2.0*alpha*S
+        if abs((RHS/LHS).real-1.)<tol: 
+            print "Converged" 
+            break                
+        #alpha=RHS/LHS
+        print alphacycle,alpha,LHS/RHS,Chi1,S
+        if (RHS/LHS).real < 0.05:
+            alpha*=0.05
         else:
-            prob=exp(-weight)
-        if prob < 0: print "Error"
-        if (np.random.rand() < prob):
-            Aguess1=Aguess2.copy()
-            Chi1=Chi2.copy()
-            Gguess1=Gguess2.copy()
-            acc+=1.0
-        #if abs(dw*Aguess1.sum()-1)>tol: print "normalization error"
-        if i%(MCcycle)==0 and i!=0:
-            print "cycles,acc,temp,chi",i,acc/MCcycle,temp,Chi1
-            if float(acc)/MCcycle > 0.1:
-                if refrac < 0.01: refrac *= 1.5
-                if refrac > 0.001: refrac /= 1.5    
-            if acc/(MCcycle)<0.001: break
-            acc=0
-            temp/=1.5
-    #Check convergence
-    tempstart=1
-    refrac=0.05        
-    lmda=dw*(np.sqrt(Aguess1)*(hessian*np.sqrt(Aguess1)).transpose()).transpose()
-    ev=linalg.eig(lmda,right=False,left=False).real
-    RHS=(ev/(alpha+ev)).sum()
-    S=maxent_def.entropy(Aguess1,model,dw)
-    LHS=-2.0*alpha*S
-    if abs((RHS/LHS).real-1.)<tol: 
-        print "Converged" 
-        break                
-    #alpha=RHS/LHS
-    print alphacycle,alpha,LHS/RHS,Chi1,S
-    if (RHS/LHS).real < 0.05:
-        alpha*=0.05
-    else:
-        alpha*=(RHS/LHS)*(1.0-0.001*np.random.uniform(-0.5,0.5))
-    print "New alpha",alpha
+            alpha*=(RHS/LHS)*(1.0-0.001*np.random.uniform(-0.5,0.5))
+        print "New alpha",alpha
+    
+    avgA=avgA+Aguess1
+
+avgA=avgA/np.size(rndseeds)
+# save spectral function
+A=[[wlist[i],avgA[i]] for i in range(wnum)]
+np.savetxt("../DOS.dat",A)
 
 #for i in range(Aguess1.size-2):
 #    Aguess1[i+1]=sum(Aguess1[i:i+2])/3.0
