@@ -1,7 +1,30 @@
 import numpy as np
 from math import *
 from copy import *
-from scipy import weave
+from pytriqs.Base.GF_Local import *
+
+
+def GtaufromGomega(G,orb,Beta,taunum=200):
+    """ Generates Gtau from Gomega using inverse fourier transform built in pytriqs 
+
+        Note: Before running this script make sure pytriqs is loaded. This script doesn't
+              load pytriqs
+    """
+    gtau=GFBloc_ImTime(Indices=[1],Beta=Beta,NTimeSlices=taunum)
+    gtau.setFromInverseFourierOf(G[orb])
+    Gin=gtau.x_data_view()[1][0][0]
+    taulist=gtau.x_data_view()[0]
+    return taulist,Gin
+    
+
+def std_error(Gin,p1=0.13,p2=0.0015):
+    """ Makes an estimate of the error in G of tau. 
+        
+        Current form uses the function in Paris version of maxent 
+    """
+    err=p1 = (abs(Gin)**p1)*p2
+    return err
+
 
 def chisquared(data,calc,err):
     """ chisquared calcuates the deviation of "calc" from "data" normalized by 
@@ -48,6 +71,7 @@ def kernel(tau,omega,beta):
         omega = list of omega points
         beta = inverse temperature
     """
+    print tau.shape, tau.size
     K = np.zeros((tau.size,omega.size))
     for i in range(tau.size):
         for j in range(omega.size):
