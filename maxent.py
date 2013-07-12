@@ -1,17 +1,33 @@
 # This script does maxent calculation to get G of omega from G of iomega from TRIQS.
 # Before running the script, start ipytriqs in interactive more. Load the necessary HDF file
 # and set ImOmegaG to the required G of iomega. 
+# 
+# Updated to include parallel calculation of different random seeds
 
 from math import *
 import numpy as np
 from scipy import linalg
-from scipy import weave
 import maxent_def
-import matplotlib.pyplot as plt
 from copy import *
 import string
 from pytriqs.Base.GF_Local import *
+from pytriqs.Base.Archive import HDF_Archive
+from mpi4py import MPI
 
+comm=MPI.COMM_WORLD
+size=comm.Get_size()
+rank=comm.Get_rank()
+
+if rank == 0:
+    ar=HDF_Archive("/home/nganba/Project/NaOsO3/LDADMFT/AF_with_spin_flip/U2J023/U2J023B10.h5")
+    ImOmegaG=ar["GF"]
+    rndseeds=np.random.random_integers(50000,100000,[size,3])
+else:
+    ImOmegaG=None
+    rndseeds=None
+
+ImOmegaG=comm.bcast(ImOmegaG,root=0)
+rndseeds=comm.scatter(rndseeds,root=0)
 
 # Construct list of omega points
 wmin=-8
@@ -33,7 +49,6 @@ for orb,g in ImOmegaG:
     #        this maxent script
     taulist,Gin=maxent_def.GtaufromGomega(ImOmegaG,orb,Beta,taunum)
     taulist=np.append(taulist,Beta)
-    print taulist
     Gin=np.append(Gin,-ImOmegaG[orb].density().real)
     Gin=-Gin
     Err=maxent_def.std_error(Gin)
@@ -51,7 +66,6 @@ for orb,g in ImOmegaG:
     # MaxEnt Loop
     avgA=np.zeros(wnum)
     # Average over random seeds 
-    rndseeds=[423945,102342,945323,453123,32481,76231]
     for rndnum in rndseeds:
         # Initialize parameters for MaxEnt
         alpha=2000.0
@@ -92,8 +106,8 @@ for orb,g in ImOmegaG:
                     Gguess1=Gguess2.copy()
                     acc+=1.0
                 #if abs(dw*Aguess1.sum()-1)>tol: print "normalization error"
-                if i%(10*MCcycle)==0 and i!=0:
-                    print "cycles,acc,temp,chi",i,acc/MCcycle,temp,Chi1
+                #if i%(10*MCcycle)==0 and i!=0:
+                #    print "cycles,acc,temp,chi",i,acc/MCcycle,temp,Chi1
                 if i%(MCcycle)==0 and i!=0:
                     if refrac < 0.01: refrac *= 1.5
                     if refrac > 0.001: refrac /= 1.5 
@@ -120,7 +134,12 @@ for orb,g in ImOmegaG:
                 print "New alpha",alpha
         avgA=avgA+Aguess1
 
-    avgA=avgA/np.size(rndseeds)
-    # save spectral function
-    A=[[wlist[i],avgA[i]] for i in range(wnum)]
-    np.savetxt("../DOSU2J023B"+int(Beta).__str__()+orb+".dat",A)
+    comm.Barrier()
+    Alist=comm.gather(avgA,root=0)
+    if rank == 0:
+        newAlist=np.array(Alist)
+        avgA=newAlist.sum(0)
+        avgA=avgA/(size*rndseeds.size)
+        # save spectral function
+        A=[[wlist[i],avgA[i]] for i in range(wnum)]
+        np.savetxt("../DOSU2J023B"+int(Beta).__str__()+orb+".dat",A)
